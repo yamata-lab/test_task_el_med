@@ -1,0 +1,84 @@
+image: python:3.10-slim
+
+# Define the sequence of stages for the CI/CD pipeline.
+stages:
+  - build
+  - lint
+  - test
+
+# Global variables available in all jobs.
+variables:
+  # --- Service Container Configuration ---
+  # These credentials are used to initialize the PostgreSQL service container.
+  POSTGRES_DB: test_db
+  POSTGRES_USER: test_user
+  POSTGRES_PASSWORD: "secure_test_password"
+
+  # --- Application Configuration ---
+  # These URLs instruct the Django application to connect to the service containers
+  # using their service aliases ('postgres' and 'redis').
+  DATABASE_URL: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}"
+  REDIS_URL: "redis://redis:6379/0"
+
+  # WARNING: The keys below are insecure dummies intended ONLY for CI.
+  # In a real project, store sensitive values in GitLab's CI/CD project settings
+  # as protected and masked variables.
+  SECRET_KEY: "dummy-secret-key-for-ci"
+  FIELD_ENCRYPTION_KEY: "dummy-encryption-key-that-is-32-bytes-long"
+
+  # --- CI Optimization ---
+  # Define a custom cache directory for pip within the project workspace.
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+
+# Cache downloaded packages between jobs and pipeline runs to speed up execution.
+cache:
+  key: "$CI_COMMIT_REF_SLUG" # Cache per branch.
+  paths:
+    - .cache/pip
+
+# This job installs system and Python dependencies needed for subsequent stages.
+install_dependencies:
+  stage: build
+  script:
+    - apt-get update && apt-get install -y libpq-dev gcc
+    - pip install --upgrade pip
+    - pip install -r requirements.txt -r requirements-dev.txt
+
+# This job enforces code quality standards by running static analysis tools.
+lint_code:
+  stage: lint
+  script:
+    - pip install flake8 black
+    - flake8 . --count --max-complexity=10 --max-line-length=127 --show-source --statistics
+    - black --check .
+
+# This job executes the Django test suite against a live database and Redis instance.
+run_tests:
+  stage: test
+  # Define service containers that provide PostgreSQL and Redis for this job.
+  # GitLab Runner will start these containers and link them to the job container.
+  services:
+    - postgres:15-alpine
+    - redis:7-alpine
+  script:
+    # Install dependencies required for this job.
+    - apt-get update && apt-get install -y libpq-dev gcc netcat-openbsd
+    - pip install --upgrade pip
+    - pip install -r requirements.txt -r requirements-dev.txt
+
+    # Create a .env file from the template. This is required if the Django settings
+    # file is configured to read from a .env file, even if all variables
+    # are already present in the CI environment.
+    - cp .env.example .env
+
+    # This block prevents a race condition by ensuring the PostgreSQL service is
+    # fully available before the tests attempt to connect to it.
+    - |
+      echo "Waiting for PostgreSQL..."
+      while ! nc -z postgres 5432; do
+        sleep 1
+      done
+      echo "PostgreSQL started"
+
+    # Execute the Django test suite.
+    - python manage.py test

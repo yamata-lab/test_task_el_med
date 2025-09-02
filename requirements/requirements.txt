@@ -1,0 +1,23 @@
+# ==============================================================================
+# Production Dependencies
+# ==============================================================================
+
+# Django Core
+django==4.2.7
+djangorestframework==3.14.0
+django-dirtyfields==1.9.7
+
+# Safety
+django-encrypted-model-fields==0.6.5
+djangorestframework-simplejwt
+
+# Database (PostgreSQL is the production standard)
+psycopg2-binary==2.9.9
+
+# Configuration Management
+python-decouple==3.8
+dj-database-url==2.1.0
+
+# Background Tasks & Broker
+celery==5.3.6
+redis==5.0.1
